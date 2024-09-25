@@ -1,0 +1,157 @@
+# Initial Profiling
+```
+Execution time: 169.24094414710999 seconds
+         67774079 function calls (62918269 primitive calls) in 169.241 seconds
+
+   Ordered by: cumulative time
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.000    0.000  169.241  169.241 /home/juan/devel/code-base-agent/src/blar_graph/graph_construction/core/graph_builder.py:484(build_graph)
+   3452/1    0.100    0.000  168.106  168.106 /home/juan/devel/code-base-agent/src/blar_graph/graph_construction/core/graph_builder.py:44(_scan_directory)
+     1370    0.126    0.000  167.400    0.122 /home/juan/devel/code-base-agent/src/blar_graph/graph_construction/languages/base_parser.py:378(parse)
+     2150    0.025    0.000  153.638    0.071 /home/juan/devel/code-base-agent/src/blar_graph/graph_construction/languages/python/python_parser.py:104(parse_file)
+    13570    0.464    0.000  137.952    0.010 /home/juan/devel/code-base-agent/src/blar_graph/graph_construction/languages/base_parser.py:213(__process_node__)
+    13570    0.935    0.000  134.529    0.010 /home/juan/devel/code-base-agent/src/blar_graph/graph_construction/languages/base_parser.py:115(_get_function_calls)
+    77584    0.048    0.000  129.552    0.002 /home/juan/devel/code-base-agent/venv/lib/python3.11/site-packages/tree_sitter/__init__.py:215(query)
+    77584  129.504    0.002  129.504    0.002 {built-in method tree_sitter.binding._language_query}
+    48688    0.272    0.000   96.266    0.002 /home/juan/devel/code-base-agent/src/blar_graph/graph_construction/languages/base_parser.py:295(_decompose_function_call)
+     1370    0.023    0.000   22.969    0.017 /home/juan/devel/code-base-agent/venv/lib/python3.11/site-packages/llama_index/core/node_parser/interface.py:128(get_nodes_from_documents)
+     1370    0.048    0.000   22.265    0.016 /home/juan/devel/code-base-agent/venv/lib/python3.11/site-packages/llama_index/core/instrumentation/dispatcher.py:244(wrapper)
+     1370    0.086    0.000   22.060    0.016 /home/juan/devel/code-base-agent/venv/lib/python3.11/site-packages/llama_index/packs/code_hierarchy/code_hierarchy.py:611(_parse_nodes)
+624652/1370    2.901    0.000   19.062    0.014 /home/juan/devel/code-base-agent/venv/lib/python3.11/site-packages/llama_index/packs/code_hierarchy/code_hierarchy.py:409(_chunk_node)
+        7    0.001    0.000   14.057    2.008 /home/juan/devel/code-base-agent/src/blar_graph/graph_construction/languages/javascript/javascript_parser.py:109(parse_file)
+704702/691132    0.715    0.000   10.738    0.000 /home/juan/devel/code-base-agent/venv/lib/python3.11/site-packages/pydantic/v1/main.py:332(__init__)
+704702/691132    3.233    0.000    9.752    0.000 /home/juan/devel/code-base-agent/venv/lib/python3.11/site-packages/pydantic/v1/main.py:1030(validate_model)
+2832053/2178634    1.931    0.000    6.361    0.000 /home/juan/devel/code-base-agent/venv/lib/python3.11/site-packages/pydantic/v1/fields.py:850(validate)
+    12200    0.035    0.000    5.129    0.000 /home/juan/devel/code-base-agent/venv/lib/python3.11/site-packages/llama_index/packs/code_hierarchy/code_hierarchy.py:334(_get_node_signature)
+2810352/12200    2.074    0.000    4.905    0.000 /home/juan/devel/code-base-agent/venv/lib/python3.11/site-packages/llama_index/packs/code_hierarchy/code_hierarchy.py:338(find_start)
+  2872140    2.913    0.000    3.801    0.000 /home/juan/devel/code-base-agent/venv/lib/python3.11/site-packages/pydantic/v1/main.py:351(__setattr__)
+    67534    3.585    0.000    3.585    0.000 {method 'parse' of 'tree_sitter.Parser' objects}
+```
+
+## Observations
+The biggest contributors to the execution time are the following:
+- `tree_sitter.binding._language_query` (129.504 seconds)
+- `pydantic.v1.main.validate_model` (9.752 seconds)
+
+# First Optimization Attempt
+Parallize the parsing of the nodes in the `parse` method of the `BaseParser` class.
+```python
+def parse(self, file_path: str, root_path: str, global_graph_info: GlobalGraphInfo, level: int):
+        path = Path(file_path)
+        if not path.exists():
+            print(f"File {file_path} does not exist.")
+            raise FileNotFoundError
+
+        documents = SimpleDirectoryReader(
+            input_files=[path],
+            file_metadata=lambda x: {"filepath": x},
+        ).load_data()
+
+        # Bug related to llama-index it's safer to remove non-ascii characters. Could be removed in the future
+        documents[0].text = self._remove_non_ascii(documents[0].text)
+
+        code = CodeHierarchyNodeParser(
+            language=self.language,
+            chunk_min_characters=3,
+            signature_identifiers=self.signature_identifiers,
+        )
+        try:
+            split_nodes = code.get_nodes_from_documents(documents)
+        except TimeoutError:
+            print(f"Timeout error: {file_path}")
+            return [], [], {}
+
+        node_list = []
+        edges_list = []
+        assignment_dict = {}
+
+        file_node, file_relations = self.__process_node__(
+            split_nodes.pop(0), file_path, "", global_graph_info, assignment_dict, documents[0], level
+        )
+
+        node_list.append(file_node)
+        edges_list.extend(file_relations)
+        max_workers = min(len(split_nodes), 8)
+        if max_workers > 0:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                results = executor.map(
+                    lambda node: self.__process_node__(
+                        node,
+                        file_path,
+                        file_node["attributes"]["node_id"],
+                        global_graph_info,
+                        assignment_dict,
+                        documents[0],
+                        level,
+                    ),
+                    split_nodes,
+                )
+
+                for processed_node, relationships in results:
+                    node_list.append(processed_node)
+                    edges_list.extend(relationships)
+
+        # for node in split_nodes:
+        #     processed_node, relationships = self.__process_node__(
+        #         node,
+        #         file_path,
+        #         file_node["attributes"]["node_id"],
+        #         global_graph_info,
+        #         assignment_dict,
+        #         documents[0],
+        #         level,
+        #     )
+
+            
+        post_processed_node_list = []
+        for node in node_list:
+            node = self._post_process_node(node, global_graph_info)
+            post_processed_node_list.append(node)
+
+        imports = self._get_imports(str(path), node_list[0]["attributes"]["node_id"], root_path)
+
+        return post_processed_node_list, edges_list, imports
+
+
+
+```
+## Profiling
+```
+execution time: 176.33099627494812 seconds
+         65002763 function calls (60146961 primitive calls) in 176.331 seconds
+
+   Ordered by: cumulative time
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.000    0.000  176.331  176.331 /home/juan/devel/code-base-agent/src/blar_graph/graph_construction/core/graph_builder.py:484(build_graph)
+   3452/1    0.103    0.000  175.220  175.220 /home/juan/devel/code-base-agent/src/blar_graph/graph_construction/core/graph_builder.py:44(_scan_directory)
+     1370    0.130    0.000  174.500    0.127 /home/juan/devel/code-base-agent/src/blar_graph/graph_construction/languages/base_parser.py:379(parse)
+     2150    0.041    0.000  158.815    0.074 /home/juan/devel/code-base-agent/src/blar_graph/graph_construction/languages/python/python_parser.py:104(parse_file)
+    12246    0.052    0.000  133.540    0.011 /usr/lib/python3.11/threading.py:295(wait)
+    50433  133.490    0.003  133.490    0.003 {method 'acquire' of '_thread.lock' objects}
+     1290    0.008    0.000   85.548    0.066 /usr/lib/python3.11/concurrent/futures/_base.py:583(map)
+     1290    0.115    0.000   85.541    0.066 /usr/lib/python3.11/concurrent/futures/_base.py:608(<listcomp>)
+    12200    0.204    0.000   85.426    0.007 /usr/lib/python3.11/concurrent/futures/thread.py:161(submit)
+    12200    0.068    0.000   85.039    0.007 /usr/lib/python3.11/concurrent/futures/thread.py:180(_adjust_thread_count)
+     4875    0.019    0.000   84.528    0.017 /usr/lib/python3.11/threading.py:945(start)
+     4875    0.022    0.000   84.349    0.017 /usr/lib/python3.11/threading.py:611(wait)
+    13490    0.012    0.000   49.291    0.004 /usr/lib/python3.11/concurrent/futures/_base.py:612(result_iterator)
+    12200    0.023    0.000   49.276    0.004 /usr/lib/python3.11/concurrent/futures/_base.py:314(_result_or_cancel)
+    12200    0.026    0.000   49.232    0.004 /usr/lib/python3.11/concurrent/futures/_base.py:428(result)
+     1370    0.024    0.000   22.875    0.017 /home/juan/devel/code-base-agent/venv/lib/python3.11/site-packages/llama_index/core/node_parser/interface.py:128(get_nodes_from_documents)
+     1370    0.039    0.000   22.170    0.016 /home/juan/devel/code-base-agent/venv/lib/python3.11/site-packages/llama_index/core/instrumentation/dispatcher.py:244(wrapper)
+     1370    0.079    0.000   21.981    0.016 /home/juan/devel/code-base-agent/venv/lib/python3.11/site-packages/llama_index/packs/code_hierarchy/code_hierarchy.py:611(_parse_nodes)
+624652/1370    3.048    0.000   18.984    0.014 /home/juan/devel/code-base-agent/venv/lib/python3.11/site-packages/llama_index/packs/code_hierarchy/code_hierarchy.py:409(_chunk_node)
+        7    0.000    0.000   15.997    2.285 /home/juan/devel/code-base-agent/src/blar_graph/graph_construction/languages/javascript/javascript_parser.py:109(parse_file)
+704702/691132    0.708    0.000   10.555    0.000 /home/juan/devel/code-base-agent/venv/lib/python3.11/site-packages/pydantic/v1/main.py:332(__init__)
+     1370    0.041    0.000    9.649    0.007 /home/juan/devel/code-base-agent/src/blar_graph/graph_construction/languages/base_parser.py:214(__process_node__)
+704702/691132    3.291    0.000    9.581    0.000 /home/juan/devel/code-base-agent/venv/lib/python3.11/site-packages/pydantic/v1/main.py:1030(validate_model)
+     1370    0.073    0.000    9.559    0.007 /home/juan/devel/code-base-agent/src/blar_graph/graph_construction/languages/base_parser.py:116(_get_function_calls)
+     5391    0.004    0.000    8.936    0.002 /home/juan/devel/code-base-agent/venv/lib/python3.11/site-packages/tree_sitter/__init__.py:215(query)
+     5391    8.932    0.002    8.932    0.002 {built-in method tree_sitter.binding._language_query}
+```
+## Observations
+The execution time increased by 7 seconds. This is due to the overhead of creating the threads and the synchronization between them. The `acquire` method of the `thread.lock` object is the one that takes the most time. This is because the `ThreadPoolExecutor` uses a `thread.lock` object to synchronize the threads.
+
+
