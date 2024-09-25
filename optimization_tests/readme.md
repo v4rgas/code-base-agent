@@ -35,7 +35,11 @@ Execution time: 169.24094414710999 seconds
 ## Observations
 Biggest time consumer is the `language_query` method of the `tree_sitter.binding` module. This method is called 77584 times and takes 129.504 seconds to execute. 
 
+Second biggest consumer is `get_nodes_from_documents` at 30s, which is also called in the `parse` method of the `BaseParser` class. 
+
 It is used in the `_decompose_function_call` method of the `BaseParser` class.
+
+Since the biggest time consumers correspond to calls to the 'llama_index' module, and these methods need to be called at least once for every file, the only way to optimize this is to parallelize the parsing the calls to the `llama_index` module.
 
 # First Optimization Attempt
 Parallize the parsing of the nodes in the `parse` method of the `BaseParser` class.
@@ -190,4 +194,3 @@ Execution time: 226.01672315597534 seconds
 
 ## Observations
 The execution time increased by 57 seconds
-
