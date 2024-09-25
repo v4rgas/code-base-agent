@@ -37,84 +37,24 @@ The biggest contributors to the execution time are the following:
 # First Optimization Attempt
 Parallize the parsing of the nodes in the `parse` method of the `BaseParser` class.
 ```python
-def parse(self, file_path: str, root_path: str, global_graph_info: GlobalGraphInfo, level: int):
-        path = Path(file_path)
-        if not path.exists():
-            print(f"File {file_path} does not exist.")
-            raise FileNotFoundError
-
-        documents = SimpleDirectoryReader(
-            input_files=[path],
-            file_metadata=lambda x: {"filepath": x},
-        ).load_data()
-
-        # Bug related to llama-index it's safer to remove non-ascii characters. Could be removed in the future
-        documents[0].text = self._remove_non_ascii(documents[0].text)
-
-        code = CodeHierarchyNodeParser(
-            language=self.language,
-            chunk_min_characters=3,
-            signature_identifiers=self.signature_identifiers,
-        )
-        try:
-            split_nodes = code.get_nodes_from_documents(documents)
-        except TimeoutError:
-            print(f"Timeout error: {file_path}")
-            return [], [], {}
-
-        node_list = []
-        edges_list = []
-        assignment_dict = {}
-
-        file_node, file_relations = self.__process_node__(
-            split_nodes.pop(0), file_path, "", global_graph_info, assignment_dict, documents[0], level
+if max_workers > 0:
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        results = executor.map(
+            lambda node: self.__process_node__(
+                node,
+                file_path,
+                file_node["attributes"]["node_id"],
+                global_graph_info,
+                assignment_dict,
+                documents[0],
+                level,
+            ),
+            split_nodes,
         )
 
-        node_list.append(file_node)
-        edges_list.extend(file_relations)
-        max_workers = min(len(split_nodes), 8)
-        if max_workers > 0:
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                results = executor.map(
-                    lambda node: self.__process_node__(
-                        node,
-                        file_path,
-                        file_node["attributes"]["node_id"],
-                        global_graph_info,
-                        assignment_dict,
-                        documents[0],
-                        level,
-                    ),
-                    split_nodes,
-                )
-
-                for processed_node, relationships in results:
-                    node_list.append(processed_node)
-                    edges_list.extend(relationships)
-
-        # for node in split_nodes:
-        #     processed_node, relationships = self.__process_node__(
-        #         node,
-        #         file_path,
-        #         file_node["attributes"]["node_id"],
-        #         global_graph_info,
-        #         assignment_dict,
-        #         documents[0],
-        #         level,
-        #     )
-
-            
-        post_processed_node_list = []
-        for node in node_list:
-            node = self._post_process_node(node, global_graph_info)
-            post_processed_node_list.append(node)
-
-        imports = self._get_imports(str(path), node_list[0]["attributes"]["node_id"], root_path)
-
-        return post_processed_node_list, edges_list, imports
-
-
-
+        for processed_node, relationships in results:
+            node_list.append(processed_node)
+            edges_list.extend(relationships)
 ```
 ## Profiling
 ```
@@ -152,6 +92,33 @@ execution time: 176.33099627494812 seconds
      5391    8.932    0.002    8.932    0.002 {built-in method tree_sitter.binding._language_query}
 ```
 ## Observations
-The execution time increased by 7 seconds. This is due to the overhead of creating the threads and the synchronization between them. The `acquire` method of the `thread.lock` object is the one that takes the most time. This is because the `ThreadPoolExecutor` uses a `thread.lock` object to synchronize the threads.
+The execution time increased by 7 seconds. This is due to the overhead of creating the threads and the synchronization between them. The `acquire` method of the `thread.lock` object is the one that takes the most time.
+
+# Second Optimization Attempt
+Use the `concurrent.futures.ProcessPoolExecutor` instead of the `ThreadPoolExecutor` to avoid the GIL.
+```python
+if max_workers > 0:
+            with ProcessPoolExecutor(max_workers=max_workers) as executor:
+                futures = []
+
+                for node in split_nodes:
+                    futures.append(
+                        executor.submit(
+                            self.__process_node__,
+                            node,
+                            file_path,
+                            file_node["attributes"]["node_id"],
+                            global_graph_info,
+                            assignment_dict,
+                            documents[0],
+                            level,
+                        )
+                    )
+
+                for future in as_completed(futures):
+                    processed_node, relationships = future.result()
+                    node_list.append(processed_node)
+                    edges_list.extend(relationships)
+```
 
 
