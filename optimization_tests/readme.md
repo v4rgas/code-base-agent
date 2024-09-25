@@ -42,7 +42,7 @@ It is used in the `_decompose_function_call` method of the `BaseParser` class.
 Since the biggest time consumers correspond to calls to the 'llama_index' module, and these methods need to be called at least once for every file, the only way to optimize this is to parallelize the parsing the calls to the `llama_index` module.
 
 # First Optimization Attempt
-Parallize the parsing of the nodes in the `parse` method of the `BaseParser` class.
+Parallelize the parsing of the nodes in the `parse` method of the `BaseParser` class.
 ```python
 if max_workers > 0:
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -194,3 +194,33 @@ Execution time: 226.01672315597534 seconds
 
 ## Observations
 The execution time increased by 57 seconds
+
+# Fourth Optimization Attempt
+Instead of creating a new ThreadPool on every call to `parse`, create a ThreadPool on the `BaseParser` class and reuse it.
+```python
+if not hasattr(self, 'executor'):
+            self.executor = ThreadPoolExecutor(max_workers=8)
+
+        if split_nodes:
+            results = self.executor.map(
+                lambda node: self.__process_node__(
+                    node,
+                    file_path,
+                    file_node["attributes"]["node_id"],
+                    global_graph_info,
+                    assignment_dict,
+                    documents[0],
+                    level,
+                ),
+                split_nodes,
+            )
+
+            for processed_node, relationships in results:
+                node_list.append(processed_node)
+                edges_list.extend(relationships)
+```
+
+## Results
+Time decreased by 3 seconds, still too much overhead. Threading needs to be implemented at a higher level.
+
+One possible solution is to add all nodes to a queue and have a pool of threads that process the nodes in the queue. This way, we can avoid the overhead of creating threads on every call to `parse`. Requires major refactoring.
