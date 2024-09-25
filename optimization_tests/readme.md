@@ -223,4 +223,4 @@ if not hasattr(self, 'executor'):
 ## Results
 Time decreased by 3 seconds, still too much overhead. Threading needs to be implemented at a higher level.
 
-One possible solution is to add all nodes to a queue and have a pool of threads that process the nodes in the queue. This way, we can avoid the overhead of creating threads on every call to `parse`. Requires major refactoring.
+One possible solution is to add all nodes to a queue and have a pool of threads that process the nodes in the queue. This way, we can avoid having to wait for all nodes to be processed before starting the next batch.
