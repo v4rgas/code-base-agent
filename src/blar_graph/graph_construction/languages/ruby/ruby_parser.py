@@ -27,7 +27,7 @@ class RubyParser(BaseParser):
                 (argument_list)? @arguments)
             (simple_symbol) @simple_symbol
             (program
-	            (identifier) @call_parts)
+                (identifier) @call_parts)
         """
 
     @property
@@ -153,7 +153,7 @@ class RubyParser(BaseParser):
         query_for_module_use = f"""
             {self.inheritances_query}
             (call
-	            receiver: (constant) @module)
+                receiver: (constant) @module)
         """
         inheritance_query = language.query(query_for_module_use)
         captured_inheritances = inheritance_query.captures(tree.root_node)
@@ -197,7 +197,7 @@ class RubyParser(BaseParser):
                     (class
                         name: (constant) @class)))
             (class
-	            name: (constant) @class)
+                name: (constant) @class)
             """
         )
 
