@@ -1,4 +1,3 @@
-from concurrent.futures import ProcessPoolExecutor, as_completed
 import hashlib
 import os
 import re
@@ -411,42 +410,21 @@ class BaseParser(ABC):
 
         node_list.append(file_node)
         edges_list.extend(file_relations)
-        max_workers = min(len(split_nodes), 8)
-        if max_workers > 0:
-            with ProcessPoolExecutor(max_workers=max_workers) as executor:
-                futures = []
 
-                for node in split_nodes:
-                    futures.append(
-                        executor.submit(
-                            self.__process_node__,
-                            node,
-                            file_path,
-                            file_node["attributes"]["node_id"],
-                            global_graph_info,
-                            assignment_dict,
-                            documents[0],
-                            level,
-                        )
-                    )
+        for node in split_nodes:
+            processed_node, relationships = self.__process_node__(
+                node,
+                file_path,
+                file_node["attributes"]["node_id"],
+                global_graph_info,
+                assignment_dict,
+                documents[0],
+                level,
+            )
 
-                for future in as_completed(futures):
-                    processed_node, relationships = future.result()
-                    node_list.append(processed_node)
-                    edges_list.extend(relationships)
+            node_list.append(processed_node)
+            edges_list.extend(relationships)
 
-        # for node in split_nodes:
-        #     processed_node, relationships = self.__process_node__(
-        #         node,
-        #         file_path,
-        #         file_node["attributes"]["node_id"],
-        #         global_graph_info,
-        #         assignment_dict,
-        #         documents[0],
-        #         level,
-        #     )
-
-            
         post_processed_node_list = []
         for node in node_list:
             node = self._post_process_node(node, global_graph_info)

@@ -95,7 +95,7 @@ execution time: 176.33099627494812 seconds
 The execution time increased by 7 seconds. This is due to the overhead of creating the threads and the synchronization between them. The `acquire` method of the `thread.lock` object is the one that takes the most time.
 
 # Second Optimization Attempt
-Use the `concurrent.futures.ProcessPoolExecutor` instead of the `ThreadPoolExecutor` to avoid the GIL.
+Use the `concurrent.futures.ProcessPoolExecutor` instead of the `ThreadPoolExecutor`.
 ```python
 if max_workers > 0:
             with ProcessPoolExecutor(max_workers=max_workers) as executor:
@@ -120,5 +120,26 @@ if max_workers > 0:
                     node_list.append(processed_node)
                     edges_list.extend(relationships)
 ```
+
+## Profiling
+```
+Execution time: 228.86374926567078 seconds
+         55372113 function calls (50537390 primitive calls) in 228.864 seconds
+
+   Ordered by: cumulative time
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.000    0.000  228.864  228.864 /home/juan/devel/code-base-agent/src/blar_graph/graph_construction/core/graph_builder.py:484(build_graph)
+   3452/1    0.141    0.000  227.905  227.905 /home/juan/devel/code-base-agent/src/blar_graph/graph_construction/core/graph_builder.py:44(_scan_directory)
+     1370    0.317    0.000  227.033    0.166 /home/juan/devel/code-base-agent/src/blar_graph/graph_construction/languages/base_parser.py:379(parse)
+     2150    0.065    0.000  220.369    0.102 /home/juan/devel/code-base-agent/src/blar_graph/graph_construction/languages/python/python_parser.py:104(parse_file)
+    65582  126.261    0.002  126.261    0.002 {method 'acquire' of '_thread.lock' objects}
+    13023    0.065    0.000  113.572    0.009 /usr/lib/python3.11/threading.py:611(wait)
+    13490    0.173    0.000  113.511    0.008 /usr/lib/python3.11/concurrent/futures/_base.py:199(as_completed)
+    13023    0.097    0.000  113.480    0.009 /usr/lib/python3.11/threading.py:295(wait)
+
+```
+## Observations
+The execution time increased by 52 seconds. This is due to the overhead of creating the processes and the synchronization between them. The `acquire` method of the `_thread.lock` object is the one that takes the most time.
 
 
