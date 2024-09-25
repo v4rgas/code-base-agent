@@ -29,10 +29,13 @@ Execution time: 169.24094414710999 seconds
     67534    3.585    0.000    3.585    0.000 {method 'parse' of 'tree_sitter.Parser' objects}
 ```
 
+## Visualization
+![Initial Profiling](./base_run.png)
+
 ## Observations
-The biggest contributors to the execution time are the following:
-- `tree_sitter.binding._language_query` (129.504 seconds)
-- `pydantic.v1.main.validate_model` (9.752 seconds)
+Biggest time consumer is the `language_query` method of the `tree_sitter.binding` module. This method is called 77584 times and takes 129.504 seconds to execute. 
+
+It is used in the `_decompose_function_call` method of the `BaseParser` class.
 
 # First Optimization Attempt
 Parallize the parsing of the nodes in the `parse` method of the `BaseParser` class.
