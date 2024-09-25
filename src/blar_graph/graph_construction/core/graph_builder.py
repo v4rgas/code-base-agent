@@ -11,6 +11,8 @@ from blar_graph.graph_construction.utils.interfaces.GlobalGraphInfo import (
     GlobalGraphInfo,
 )
 
+from collections import deque
+
 
 class GraphConstructor:
     graph_manager: Neo4jManager
@@ -85,81 +87,88 @@ class GraphConstructor:
             )
 
         nodes.append(directory_node)
-        for entry in os.scandir(path):
-            if self._skip_file(entry.name):
-                continue
-            if entry.is_file():
-                parser: BaseParser | None = self.parsers.get_parser(entry.name)
-                # If the file is a supported language, parse it
-                if parser:
-                    entry_name = entry.name.split(parser.extension)[0]
-                    try:
-                        processed_nodes, relations, file_imports = parser.parse_file(
-                            entry.path,
-                            self.root,
-                            global_graph_info=self.global_graph_info,
-                            level=level,
-                        )
-                    except Exception:
-                        print(f"Error {entry.path}")
-                        print(traceback.format_exc())
-                        continue
-                    if not processed_nodes:
-                        self.global_graph_info.import_aliases.update(file_imports)
-                        continue
-                    file_root_node_id = processed_nodes[0]["attributes"]["node_id"]
 
-                    nodes.extend(processed_nodes)
-                    relationships.extend(relations)
-                    relationships.append(
-                        {
-                            "sourceId": directory_node_id,
-                            "targetId": file_root_node_id,
-                            "type": "CONTAINS",
-                        }
-                    )
-                    imports.update(file_imports)
+        # Using a stack to manage directories to scan
+        stack = deque([(path, directory_node_id, level)])
 
-                    global_import_key = (directory_path + entry_name).replace("/", ".")
-                    self.global_graph_info.imports[global_import_key] = {
-                        "id": file_root_node_id,
-                        "type": "FILE",
-                        "node": processed_nodes[0],
-                    }
-                # If the file is not a supported language, only make the file node with all the text
-                else:
-                    try:
-                        with open(entry.path, "r", encoding="utf-8") as file:
-                            text = file.read()
-                    except UnicodeDecodeError:
-                        print(f"Error reading file {entry.path}")
-                        continue
+        while stack:
+            current_path, current_parent_id, current_level = stack.pop()
 
-                    file_node = {
-                        "type": "FILE",
-                        "attributes": {
-                            "path": entry.path,
-                            "file_path": entry.path,
-                            "name": entry.name,
-                            "node_id": BaseParser.generate_node_id(entry.path, self.global_graph_info.entity_id),
-                            "text": text,
-                        },
-                    }
-                    nodes.append(file_node)
-                    relationships.append(
-                        {
-                            "sourceId": directory_node_id,
-                            "targetId": file_node["attributes"]["node_id"],
-                            "type": "CONTAINS",
-                        }
-                    )
-            if entry.is_dir():
-                if self._skip_directory(entry.name):
+            for entry in os.scandir(current_path):
+                if self._skip_file(entry.name):
                     continue
+                if entry.is_file():
+                    parser: BaseParser | None = self.parsers.get_parser(entry.name)
+                    # If the file is a supported language, parse it
+                    if parser:
+                        entry_name = entry.name.split(parser.extension)[0]
+                        try:
+                            processed_nodes, relations, file_imports = parser.parse_file(
+                                entry.path,
+                                self.root,
+                                global_graph_info=self.global_graph_info,
+                                level=current_level,
+                            )
+                        except Exception:
+                            print(f"Error {entry.path}")
+                            print(traceback.format_exc())
+                            continue
+                        if not processed_nodes:
+                            self.global_graph_info.import_aliases.update(file_imports)
+                            continue
+                        file_root_node_id = processed_nodes[0]["attributes"]["node_id"]
 
-                nodes, relationships, imports = self._scan_directory(
-                    entry.path, nodes, relationships, imports, directory_node_id, level + 1
-                )
+                        nodes.extend(processed_nodes)
+                        relationships.extend(relations)
+                        relationships.append(
+                            {
+                                "sourceId": current_parent_id,
+                                "targetId": file_root_node_id,
+                                "type": "CONTAINS",
+                            }
+                        )
+                        imports.update(file_imports)
+
+                        global_import_key = (directory_path + entry_name).replace("/", ".")
+                        self.global_graph_info.imports[global_import_key] = {
+                            "id": file_root_node_id,
+                            "type": "FILE",
+                            "node": processed_nodes[0],
+                        }
+                    # If the file is not a supported language, only make the file node with all the text
+                    else:
+                        try:
+                            with open(entry.path, "r", encoding="utf-8") as file:
+                                text = file.read()
+                        except UnicodeDecodeError:
+                            print(f"Error reading file {entry.path}")
+                            continue
+
+                        file_node = {
+                            "type": "FILE",
+                            "attributes": {
+                                "path": entry.path,
+                                "file_path": entry.path,
+                                "name": entry.name,
+                                "node_id": BaseParser.generate_node_id(entry.path, self.global_graph_info.entity_id),
+                                "text": text,
+                            },
+                        }
+                        nodes.append(file_node)
+                        relationships.append(
+                            {
+                                "sourceId": current_parent_id,
+                                "targetId": file_node["attributes"]["node_id"],
+                                "type": "CONTAINS",
+                            }
+                        )
+                if entry.is_dir():
+                    if self._skip_directory(entry.name):
+                        continue
+
+                    # Add the directory to the stack to process later
+                    stack.append((entry.path, directory_node_id, current_level + 1))
+
         return nodes, relationships, imports
 
     def _relate_wildcard_imports(self, file_node_id: str, imports_list: list):

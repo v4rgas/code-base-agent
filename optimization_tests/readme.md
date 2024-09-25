@@ -142,4 +142,49 @@ Execution time: 228.86374926567078 seconds
 ## Observations
 The execution time increased by 52 seconds. This is due to the overhead of creating the processes and the synchronization between them. The `acquire` method of the `_thread.lock` object is the one that takes the most time.
 
+# Third Optimization Attempt
+Replace recursive calls with a stack-based approach in `_scan_directory`.
+```python
+  # Using a stack to manage directories to scan
+        stack = deque([(path, directory_node_id, level)])
+
+        while stack:
+            current_path, current_parent_id, current_level = stack.pop()
+
+            for entry in os.scandir(current_path):
+                if self._skip_file(entry.name):
+                    continue
+```
+
+## Profiling
+```
+Execution time: 226.01672315597534 seconds
+         88509843 function calls (82450375 primitive calls) in 226.017 seconds
+
+   Ordered by: cumulative time
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.000    0.000  226.017  226.017 /home/juan/devel/code-base-agent/src/blar_graph/graph_construction/core/graph_builder.py:493(build_graph)
+        1    0.107    0.107  224.568  224.568 /home/juan/devel/code-base-agent/src/blar_graph/graph_construction/core/graph_builder.py:46(_scan_directory)
+     2387    0.157    0.000  223.835    0.094 /home/juan/devel/code-base-agent/src/blar_graph/graph_construction/languages/base_parser.py:378(parse)
+     3775    0.032    0.000  210.420    0.056 /home/juan/devel/code-base-agent/src/blar_graph/graph_construction/languages/python/python_parser.py:104(parse_file)
+    18760    0.506    0.000  185.540    0.010 /home/juan/devel/code-base-agent/src/blar_graph/graph_construction/languages/base_parser.py:213(__process_node__)
+    18760    1.132    0.000  181.703    0.010 /home/juan/devel/code-base-agent/src/blar_graph/graph_construction/languages/base_parser.py:115(_get_function_calls)
+   107092    0.061    0.000  175.696    0.002 /home/juan/devel/code-base-agent/venv/lib/python3.11/site-packages/tree_sitter/__init__.py:215(query)
+   107092  175.635    0.002  175.635    0.002 {built-in method tree_sitter.binding._language_query}
+    67559    0.326    0.000  130.997    0.002 /home/juan/devel/code-base-agent/src/blar_graph/graph_construction/languages/base_parser.py:295(_decompose_function_call)
+     2387    0.033    0.000   29.733    0.012 /home/juan/devel/code-base-agent/venv/lib/python3.11/site-packages/llama_index/core/node_parser/interface.py:128(get_nodes_from_documents)
+     2387    0.055    0.000   28.766    0.012 /home/juan/devel/code-base-agent/venv/lib/python3.11/site-packages/llama_index/core/instrumentation/dispatcher.py:244(wrapper)
+     2387    0.113    0.000   28.461    0.012 /home/juan/devel/code-base-agent/venv/lib/python3.11/site-packages/llama_index/packs/code_hierarchy/code_hierarchy.py:611(_parse_nodes)
+822072/2387    3.710    0.000   24.466    0.010 /home/juan/devel/code-base-agent/venv/lib/python3.11/site-packages/llama_index/packs/code_hierarchy/code_hierarchy.py:409(_chunk_node)
+932245/913485    0.970    0.000   13.932    0.000 /home/juan/devel/code-base-agent/venv/lib/python3.11/site-packages/pydantic/v1/main.py:332(__init__)
+        7    0.001    0.000   13.770    1.967 /home/juan/devel/code-base-agent/src/blar_graph/graph_construction/languages/javascript/javascript_parser.py:109(parse_file)
+932245/913485    4.384    0.000   12.606    0.000 /home/juan/devel/code-base-agent/venv/lib/python3.11/site-packages/pydantic/v1/main.py:1030(validate_model)
+3777296/2886519    2.538    0.000    8.249    0.000 /home/juan/devel/code-base-agent/venv/lib/python3.11/site-packages/pydantic/v1/fields.py:850(validate)
+    16373    0.047    0.000    6.596    0.000 /home/juan/devel/code-base-agent/venv/lib/python3.11/site-packages/llama_index/packs/code_hierarchy/code_hierarchy.py:334(_get_node_signature)
+3374262/16373    2.522    0.000    6.326    0.000 /home/juan/devel/code-base-agent/venv/lib/python3.11/site-packages/llama_index/packs/code_hierarchy/code_hierarchy.py:338(find_start)
+```
+
+## Observations
+The execution time increased by 57 seconds
 
